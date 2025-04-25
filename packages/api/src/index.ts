@@ -1,64 +1,91 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import { create } from 'ipfs-http-client';
-
-dotenv.config();
+import { ethers } from 'ethers';
+import { config } from './config.js';
 
 const app = express();
-const port = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 app.use(express.json());
 
-// IPFS client setup
-const projectId = process.env.IPFS_PROJECT_ID;
-const projectSecret = process.env.IPFS_PROJECT_SECRET;
-const auth = 'Basic ' + Buffer.from(projectId + ':' + projectSecret).toString('base64');
+// In-memory storage (replace with database in production)
+const didDocuments = new Map();
 
-const ipfs = create({
-  host: 'ipfs.infura.io',
-  port: 5001,
-  protocol: 'https',
-  headers: {
-    authorization: auth,
-  },
-});
-
-// Routes
-app.get('/health', (req, res) => {
+// Health check endpoint
+app.get('/health', async (req, res) => {
   res.json({ status: 'ok' });
 });
 
 // DID routes
-app.post('/api/did', async (req, res) => {
+app.post('/api/did/create', async (req, res) => {
   try {
-    const { did, publicKeys, services } = req.body;
-    const result = await ipfs.add(JSON.stringify({ did, publicKeys, services }));
-    res.json({ cid: result.path });
+    const { did, publicKeys, services, user, signature, message } = req.body;
+
+    if (!did || !publicKeys || !services || !user || !signature || !message) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Verify the signature
+    const recoveredAddress = ethers.utils.verifyMessage(message, signature);
+
+    if (recoveredAddress.toLowerCase() !== user.toLowerCase()) {
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    // Store the DID document in memory
+    const didDocument = {
+      did,
+      publicKeys,
+      services,
+      controller: user,
+      created: new Date().toISOString(),
+      updated: new Date().toISOString()
+    };
+
+    didDocuments.set(did, didDocument);
+    
+    res.json({ 
+      did,
+      document: didDocument
+    });
   } catch (error) {
-    console.error('Error storing DID:', error);
-    res.status(500).json({ error: 'Failed to store DID' });
+    console.error('Error creating DID:', error);
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to create DID'
+    });
   }
 });
 
-app.get('/api/did/:cid', async (req, res) => {
+app.get('/api/did/:did', async (req, res) => {
   try {
-    const { cid } = req.params;
-    const stream = ipfs.cat(cid);
-    let data = '';
-    for await (const chunk of stream) {
-      data += chunk.toString();
+    const { did } = req.params;
+    const document = didDocuments.get(did);
+    
+    if (!document) {
+      return res.status(404).json({ error: 'DID not found' });
     }
-    res.json(JSON.parse(data));
+    
+    res.json(document);
   } catch (error) {
     console.error('Error retrieving DID:', error);
-    res.status(500).json({ error: 'Failed to retrieve DID' });
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to retrieve DID'
+    });
   }
 });
 
 // Start server
-app.listen(port, () => {
-  console.log(`API server running on port ${port}`);
+const server = app.listen(config.port, () => {
+  console.log(`API server running on port ${config.port}`);
+});
+
+// Handle server errors
+server.on('error', (error) => {
+  console.error('Server error:', error);
 }); 

@@ -1,14 +1,36 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  console.log("Deploying DIDRegistry contract...");
+  try {
+    console.log("Starting deployment of DIDRegistry...");
 
-  const DIDRegistry = await ethers.getContractFactory("DIDRegistry");
-  const didRegistry = await DIDRegistry.deploy();
+    // Get the deployer's address
+    const [deployer] = await ethers.getSigners();
+    console.log("Deploying with account:", deployer.address);
 
-  await didRegistry.deployed();
+    // Get the contract factory
+    const DIDRegistry = await ethers.getContractFactory("DIDRegistry");
+    console.log("Contract factory created...");
 
-  console.log(`DIDRegistry deployed to: ${didRegistry.address}`);
+    // Deploy the contract with the deployer as the initial owner
+    const didRegistry = await DIDRegistry.deploy(deployer.address);
+    console.log("Contract deployment initiated...");
+
+    // Wait for deployment to complete
+    await didRegistry.deployed();
+    
+    console.log("Contract deployed successfully!");
+    console.log("Contract address:", didRegistry.address);
+
+    // Log deployment details
+    console.log("Deployed by:", deployer.address);
+    console.log("Deployer balance:", ethers.utils.formatEther(await deployer.getBalance()), "ETH");
+
+  } catch (error) {
+    console.error("Error during deployment:");
+    console.error(error);
+    process.exit(1);
+  }
 }
 
 main()
